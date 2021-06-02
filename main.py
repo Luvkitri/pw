@@ -14,28 +14,29 @@ lock = QReadWriteLock()
 
 
 class Client(object):
-    def __init__(self, name):
+    def __init__(self, name: str):
         self.name = name
         self.files = []
         self.priority = 0.0
-        self.waiting_time = 0
-        self.last_handle = 0
+
+        # Variable describing when client was added to queue
+        self.time_added = time.time()
+
+        # Variable describing when was the last time this client's file was handled
+        self.last_handle = time.time()
 
         self.generate_files()
 
     def generate_files(self):
-        for i in range(random.randint(1, 15)):
-            self.files.append(
-                ClientFile(self, WORDS.get_random_word(), random.randint(1, 1024))
-            )
+        for _ in range(random.randint(1, 15)):
+            self.files.append(ClientFile(self, random.randint(1, 1024)))
 
         self.files.sort(key=lambda client_file: client_file.size)
 
 
 class ClientFile(object):
-    def __init__(self, client: Client, file_name: str, file_size: int):
+    def __init__(self, client: Client, file_size: int):
         self.client_id = id(client)
-        self.name = file_name
         self.size = file_size
 
 
@@ -140,32 +141,31 @@ class MainWindow(QMainWindow, Ui_MainWindow):
 
         if disk_index == 1:
             self.label_disk1.setText(
-                f"Owner: {client_name} | File name: {client_file.name} | File size: {client_file.size}"
+                f"Owner: {client_name} | File size: {client_file.size}"
             )
 
         if disk_index == 2:
             self.label_disk2.setText(
-                f"Owner: {client_name} | File name: {client_file.name} | File size: {client_file.size}"
+                f"Owner: {client_name} | File size: {client_file.size}"
             )
 
         if disk_index == 3:
             self.label_disk3.setText(
-                f"Owner: {client_name} | File name: {client_file.name} | File size: {client_file.size}"
+                f"Owner: {client_name} | File size: {client_file.size}"
             )
 
         if disk_index == 4:
             self.label_disk4.setText(
-                f"Owner: {client_name} | File name: {client_file.name} | File size: {client_file.size}"
+                f"Owner: {client_name} | File size: {client_file.size}"
             )
 
         if disk_index == 5:
             self.label_disk5.setText(
-                f"Owner: {client_name} | File name: {client_file.name} | File size: {client_file.size}"
+                f"Owner: {client_name} | File size: {client_file.size}"
             )
 
     def disk_progress(self, disk_index: int, percentage: int):
         if disk_index == 1:
-            print(percentage)
             self.progress_bar_disk1.setValue(percentage)
             return
 
@@ -206,7 +206,7 @@ class MainWindow(QMainWindow, Ui_MainWindow):
         """
         For each 'free' disk launch auction
         """
-
+        
         first_client = next(iter(self.clients.items()))
         client_file = first_client[1].files.pop(0)
         first_client[1].table_widget.removeRow(0)
@@ -249,7 +249,7 @@ class MainWindow(QMainWindow, Ui_MainWindow):
             ),
         )
 
-        # Add client to referance dictionary
+        # Add client to dictionary
         lock.lockForWrite()
         self.clients[id(client)] = client
         lock.unlock()
