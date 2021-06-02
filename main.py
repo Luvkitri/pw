@@ -10,7 +10,7 @@ from PyQt5.QtCore import *
 
 WORDS = RandomWords()
 
-lock = QReadWriteLock()
+mutex = QMutex()
 
 
 class Client(object):
@@ -32,6 +32,14 @@ class Client(object):
             self.files.append(ClientFile(self, random.randint(1, 1024)))
 
         self.files.sort(key=lambda client_file: client_file.size)
+
+    def calculate_prio(self, max_waiting_time):
+        waiting_time = time.time() - self.time_added
+        last_handle = time.time() - self.last_handle
+        client_file = self.files.pop()
+        file_size = client_file.size if client_file.size < 1 else 1
+
+        self.piority = (max_waiting_time / file_size) + ((waiting_time + last_handle) / max_waiting_time)
 
 
 class ClientFile(object):
@@ -89,6 +97,42 @@ class Worker(QRunnable):
         finally:
             # Done
             self.signals.finished.emit()
+
+
+class LoadBalancerWorker(QThread):
+    clients = pyqtSignal()
+
+    def __init__(self, parent=None):
+        QThread.__init__(self, parent)
+        self.exisiting = False
+
+    def __del__(self):
+        self.exisiting = True
+        self.wait()
+
+
+    def auction(self):
+        mutex.lock()
+        first_client = next(iter(self.clients.items()))
+        max_waiting_time = time.time() - first_client.time_added
+
+        first_client.calculate_prio(max_waiting_time)
+
+        client_with_highest_prio = first_client
+        client_with_highest_prio_key = None
+        
+        for key, client in self.clients.items():
+            client.calculate_prio(max_waiting_time)
+
+            if client_with_highest_prio.priority >= client.priority:    
+                client_with_highest_prio = client
+                client_with_highest_prio_key = key
+            
+        # Return client that won an auction
+        return (client_with_highest_prio_key, client_with_highest_prio)
+
+    def run(self):
+        pass
 
 
 class MainWindow(QMainWindow, Ui_MainWindow):
@@ -206,7 +250,7 @@ class MainWindow(QMainWindow, Ui_MainWindow):
         """
         For each 'free' disk launch auction
         """
-        
+
         first_client = next(iter(self.clients.items()))
         client_file = first_client[1].files.pop(0)
         first_client[1].table_widget.removeRow(0)
