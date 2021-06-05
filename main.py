@@ -10,7 +10,17 @@ from PyQt5.QtCore import *
 
 WORDS = RandomWords()
 
+# Init clients
+clients = {}
+files = []
 mutex = QMutex()
+disk_threads = {
+    1: None,
+    2: None,
+    3: None,
+    4: None,
+    5: None,
+}
 
 
 class Client(object):
@@ -34,12 +44,28 @@ class Client(object):
         self.files.sort(key=lambda client_file: client_file.size)
 
     def calculate_prio(self, max_waiting_time):
+        if not self.files:
+            self.priority = 0.0
+            return
+
+        print('Calculating a prio!')
         waiting_time = time.time() - self.time_added
         last_handle = time.time() - self.last_handle
-        client_file = self.files.pop()
-        file_size = client_file.size if client_file.size < 1 else 1
+        
+        client_file = self.files[0]
+        file_size = 1 if client_file.size < 1 else client_file.size
 
-        self.piority = (max_waiting_time / file_size) + ((waiting_time + last_handle) / max_waiting_time)
+        print(f'Waiting time {waiting_time}')
+        print(f'Last handle {last_handle}')
+        print(f'file_size {file_size}')
+
+        self.priority = (max_waiting_time / file_size) + (
+            (waiting_time + last_handle) / max_waiting_time
+        )
+
+        print(f'Prio: {self.priority}')
+
+        
 
 
 class ClientFile(object):
@@ -99,40 +125,59 @@ class Worker(QRunnable):
             self.signals.finished.emit()
 
 
-class LoadBalancerWorker(QThread):
-    clients = pyqtSignal()
+class LoadBalancerWorker(QObject):
+    finished = pyqtSignal()
+    client_rdy = pyqtSignal(int, Client)
 
     def __init__(self, parent=None):
         QThread.__init__(self, parent)
-        self.exisiting = False
+        self.running = True
 
     def __del__(self):
-        self.exisiting = True
+        self.running = False
         self.wait()
-
 
     def auction(self):
         mutex.lock()
-        first_client = next(iter(self.clients.items()))
+        first_client = next(iter(clients.values()))
         max_waiting_time = time.time() - first_client.time_added
 
         first_client.calculate_prio(max_waiting_time)
+        (f'First client prio: {first_client.priority}')
 
         client_with_highest_prio = first_client
         client_with_highest_prio_key = None
-        
-        for key, client in self.clients.items():
+
+        for key, client in clients.items():
             client.calculate_prio(max_waiting_time)
 
-            if client_with_highest_prio.priority >= client.priority:    
+            print(f'If current highest {client_with_highest_prio.priority} >= {client.priority}')
+            if client_with_highest_prio.priority <= client.priority:
+                print("yep")
                 client_with_highest_prio = client
                 client_with_highest_prio_key = key
-            
+
+        mutex.unlock()
+
+        
+
         # Return client that won an auction
         return (client_with_highest_prio_key, client_with_highest_prio)
 
     def run(self):
-        pass
+        while self.running:
+            for disk_id, disk_thread in disk_threads.items():
+                if disk_thread is None:
+                    client = self.auction()
+                    self.client_rdy.emit(disk_id, client[1])
+                    print(
+                        f"Client {client[1].name} won the auction. His file will be handled by disk: {disk_id}"
+                    )
+                    mutex.lock()
+                    disk_threads[disk_id] = 1
+                    mutex.unlock()
+
+        self.finished.emit()
 
 
 class MainWindow(QMainWindow, Ui_MainWindow):
@@ -141,18 +186,6 @@ class MainWindow(QMainWindow, Ui_MainWindow):
 
         # Init all the ui elements
         self.setupUi(self)
-
-        # Init disk threads
-        self.disk_threads = {
-            1: None,
-            2: None,
-            3: None,
-            4: None,
-            5: None,
-        }
-
-        # Init clients
-        self.clients = {}
 
         # Init Table
         self.table_of_clients = QTableWidget()
@@ -180,7 +213,7 @@ class MainWindow(QMainWindow, Ui_MainWindow):
         self, disk_index: int, client_name: str, client_file: ClientFile
     ):
         print(
-            f"Disk {disk_index} started. Owner: {client_name} | File name: {client_file.name} | File size: {client_file.size}"
+            f"Disk {disk_index} started. Owner: {client_name} | File size: {client_file.size}"
         )
 
         if disk_index == 1:
@@ -243,40 +276,51 @@ class MainWindow(QMainWindow, Ui_MainWindow):
 
     def disk_thread_complete(self, disk_index):
         print("Disk thread complete")
-        self.disk_threads[disk_index] = None
-        print(self.disk_threads)
+        mutex.lock()
+        disk_threads[disk_index] = None
+        print(disk_threads)
+        mutex.unlock()
 
     def start_load_balancer(self):
-        """
-        For each 'free' disk launch auction
-        """
+        # Create a QThread object
+        self.load_balancer_thread = QThread()
+        # Create a worker object
+        self.load_balancer = LoadBalancerWorker()
+        # Move worker to the thread
+        self.load_balancer.moveToThread(self.load_balancer_thread)
+        # Connect signal and slots
+        self.load_balancer_thread.started.connect(self.load_balancer.run)
+        self.load_balancer.finished.connect(self.load_balancer_thread.quit)
+        self.load_balancer.finished.connect(self.load_balancer.deleteLater)
+        self.load_balancer.finished.connect(self.load_balancer_thread.deleteLater)
+        self.load_balancer.client_rdy.connect(self.start_disk_thread)
+        # Start load balancer thread
+        self.load_balancer_thread.start()
 
-        first_client = next(iter(self.clients.items()))
-        client_file = first_client[1].files.pop(0)
-        first_client[1].table_widget.removeRow(0)
+    def start_disk_thread(self, disk_id, client):
+        mutex.lock()
+        client_file = client.files.pop(0)
 
-        if first_client[1].table_widget.item(0, 0) is None:
-            first_client[1].table_widget.deleteLater()
-            self.clients.pop(first_client[0])
-
-        self.disk_threads[1] = Worker(
+        disk_threads[disk_id] = Worker(
             self.disk_task,
-            disk_index=1,
-            client_name=first_client[1].name,
+            disk_index=disk_id,
+            client_name=client.name,
             client_file=client_file,
             disk_worker=True,
         )
-        self.disk_threads[1].signals.disk_thread_started.connect(
+        disk_threads[disk_id].signals.disk_thread_started.connect(
             self.disk_thread_started
         )
-        self.disk_threads[1].signals.disk_progress.connect(self.disk_progress)
-        self.disk_threads[1].signals.finished.connect(self.thread_complete)
+        disk_threads[disk_id].signals.disk_progress.connect(self.disk_progress)
+        disk_threads[disk_id].signals.finished.connect(self.thread_complete)
 
-        self.threadpool.start(self.disk_threads[1])
+        self.threadpool.start(disk_threads[disk_id])
+        mutex.unlock()
 
     def stop_disk_threads(self):
-        for thread in self.disk_threads.values():
-            thread.stop()
+        for thread in disk_threads.values():
+            if thread is not None:
+                thread.stop()
 
         self.button_start.setEnabled(True)
 
@@ -294,9 +338,9 @@ class MainWindow(QMainWindow, Ui_MainWindow):
         )
 
         # Add client to dictionary
-        lock.lockForWrite()
-        self.clients[id(client)] = client
-        lock.unlock()
+        mutex.lock()
+        clients[id(client)] = client
+        mutex.unlock()
 
     def generate_client(self):
         return Client(name=WORDS.get_random_word())
