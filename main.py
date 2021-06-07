@@ -48,24 +48,22 @@ class Client(object):
             self.priority = 0.0
             return
 
-        print('Calculating a prio!')
+        print("Calculating a prio!")
         waiting_time = time.time() - self.time_added
         last_handle = time.time() - self.last_handle
-        
+
         client_file = self.files[0]
         file_size = 1 if client_file.size < 1 else client_file.size
 
-        print(f'Waiting time {waiting_time}')
-        print(f'Last handle {last_handle}')
-        print(f'file_size {file_size}')
+        print(f"Waiting time {waiting_time}")
+        print(f"Last handle {last_handle}")
+        print(f"File size {file_size}")
 
         self.priority = (max_waiting_time / file_size) + (
             (waiting_time + last_handle) / max_waiting_time
         )
 
-        print(f'Prio: {self.priority}')
-
-        
+        print(f"Prio: {self.priority}")
 
 
 class ClientFile(object):
@@ -126,7 +124,7 @@ class Worker(QRunnable):
             if "disk_worker" in self.kwargs:
                 self.signals.disk_thread_complete.emit(self.kwargs["disk_index"])
             else:
-            self.signals.finished.emit()
+                self.signals.finished.emit()
 
 
 class LoadBalancerWorker(QObject):
@@ -201,6 +199,9 @@ class MainWindow(QMainWindow, Ui_MainWindow):
         header = self.table_of_clients.horizontalHeader()
         header.setSectionResizeMode(1, QHeaderView.Stretch)
         self.horizontal_layout.addWidget(self.table_of_clients)
+
+        # Client postions in table
+        self.clients_row_positions = {}
 
         # Connect buttons to functions
         self.button_add_client.clicked.connect(self.add_client)
@@ -279,6 +280,7 @@ class MainWindow(QMainWindow, Ui_MainWindow):
             time.sleep(1)
             progress_callback.emit(disk_index, int(i * 100 / client_file.size))
 
+        time.sleep(1)
         progress_callback.emit(disk_index, 100)
 
     def disk_thread_complete(self, disk_index):
@@ -304,9 +306,13 @@ class MainWindow(QMainWindow, Ui_MainWindow):
         # Start load balancer thread
         self.load_balancer_thread.start()
 
+        self.button_start.setDisabled()
+
     def start_disk_thread(self, disk_id, client):
         mutex.lock()
         client_file = client.files.pop(0)
+
+        self.update_client_entry(client)
 
         disk_threads[disk_id] = Worker(
             self.disk_task,
@@ -335,11 +341,14 @@ class MainWindow(QMainWindow, Ui_MainWindow):
 
     def add_client_to_table(self, client):
         # Add client to QT table
-        rowPosition = self.table_of_clients.rowCount()
-        self.table_of_clients.insertRow(rowPosition)
-        self.table_of_clients.setItem(rowPosition, 0, QTableWidgetItem(client.name))
+        row_position = self.table_of_clients.rowCount()
+
+        self.clients_row_positions[id(client)] = row_position
+
+        self.table_of_clients.insertRow(row_position)
+        self.table_of_clients.setItem(row_position, 0, QTableWidgetItem(client.name))
         self.table_of_clients.setItem(
-            rowPosition,
+            row_position,
             1,
             QTableWidgetItem(
                 " | ".join([str(client_file.size) for client_file in client.files])
@@ -350,6 +359,23 @@ class MainWindow(QMainWindow, Ui_MainWindow):
         mutex.lock()
         clients[id(client)] = client
         mutex.unlock()
+
+    def update_client_entry(self, client):
+        row_position = self.clients_row_positions[id(client)]
+
+        # If client has no more files remove him from table
+        if not client.files:
+            self.table_of_clients.removeRow(row_position)
+            return
+
+        # Update client files entry
+        self.table_of_clients.setItem(
+            row_position,
+            1,
+            QTableWidgetItem(
+                " | ".join([str(client_file.size) for client_file in client.files])
+            ),
+        )
 
     def generate_client(self):
         return Client(name=WORDS.get_random_word())
