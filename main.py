@@ -84,6 +84,7 @@ class WorkerSignals(QObject):
     # Disk signals
     disk_thread_started = pyqtSignal(int, str, ClientFile)
     disk_progress = pyqtSignal(int, int)
+    disk_thread_complete = pyqtSignal(int)
 
 
 class Worker(QRunnable):
@@ -122,6 +123,9 @@ class Worker(QRunnable):
             self.signals.result.emit(result)
         finally:
             # Done
+            if "disk_worker" in self.kwargs:
+                self.signals.disk_thread_complete.emit(self.kwargs["disk_index"])
+            else:
             self.signals.finished.emit()
 
 
@@ -315,7 +319,9 @@ class MainWindow(QMainWindow, Ui_MainWindow):
             self.disk_thread_started
         )
         disk_threads[disk_id].signals.disk_progress.connect(self.disk_progress)
-        disk_threads[disk_id].signals.finished.connect(self.thread_complete)
+        disk_threads[disk_id].signals.disk_thread_complete.connect(
+            self.disk_thread_complete
+        )
 
         self.threadpool.start(disk_threads[disk_id])
         mutex.unlock()
