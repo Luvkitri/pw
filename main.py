@@ -173,14 +173,14 @@ class LoadBalancerWorker(QObject):
         while self.running:
             for disk_id, disk_thread in disk_threads.items():
                 if disk_thread is None:
+                    mutex.lock()
+                    disk_threads[disk_id] = 1
+                    mutex.unlock()
                     client = self.auction()
                     self.client_rdy.emit(disk_id, client[1])
                     print(
                         f"Client {client[1].name} won the auction. His file will be handled by disk: {disk_id}"
                     )
-                    mutex.lock()
-                    disk_threads[disk_id] = 1
-                    mutex.unlock()
 
         self.finished.emit()
 
@@ -206,7 +206,7 @@ class MainWindow(QMainWindow, Ui_MainWindow):
         # Connect buttons to functions
         self.button_add_client.clicked.connect(self.add_client)
         self.button_start.clicked.connect(self.start_load_balancer)
-        self.button_stop.clicked.connect(self.stop_disk_threads)
+        self.button_stop.clicked.connect(self.close_program)
 
         # Init thread pool
         self.threadpool = QThreadPool()
@@ -306,7 +306,7 @@ class MainWindow(QMainWindow, Ui_MainWindow):
         # Start load balancer thread
         self.load_balancer_thread.start()
 
-        self.button_start.setDisabled()
+        self.button_start.setEnabled(False)
 
     def start_disk_thread(self, disk_id, client):
         mutex.lock()
@@ -332,12 +332,8 @@ class MainWindow(QMainWindow, Ui_MainWindow):
         self.threadpool.start(disk_threads[disk_id])
         mutex.unlock()
 
-    def stop_disk_threads(self):
-        for thread in disk_threads.values():
-            if thread is not None:
-                thread.stop()
-
-        self.button_start.setEnabled(True)
+    def close_program(self):
+        exit()
 
     def add_client_to_table(self, client):
         # Add client to QT table

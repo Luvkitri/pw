@@ -97,7 +97,7 @@ class Ui_MainWindow(object):
         self.label_disk4.setText(_translate("MainWindow", "Disk 4"))
         self.label_disk5.setText(_translate("MainWindow", "Disk 5"))
         self.button_start.setText(_translate("MainWindow", "Start"))
-        self.button_stop.setText(_translate("MainWindow", "Stop"))
+        self.button_stop.setText(_translate("MainWindow", "Exit"))
 
 
 if __name__ == "__main__":
