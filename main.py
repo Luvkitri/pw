@@ -143,7 +143,7 @@ class LoadBalancerWorker(QObject):
         max_waiting_time = time.time() - first_client.time_added
 
         first_client.calculate_prio(max_waiting_time)
-        (f'First client prio: {first_client.priority}')
+        (f"First client prio: {first_client.priority}")
 
         client_with_highest_prio = first_client
         client_with_highest_prio_key = None
@@ -151,7 +151,9 @@ class LoadBalancerWorker(QObject):
         for key, client in clients.items():
             client.calculate_prio(max_waiting_time)
 
-            print(f'If current highest {client_with_highest_prio.priority} >= {client.priority}')
+            print(
+                f"If current highest {client_with_highest_prio.priority} >= {client.priority}"
+            )
             if client_with_highest_prio.priority <= client.priority:
                 print("yep")
                 client_with_highest_prio = client
@@ -159,7 +161,8 @@ class LoadBalancerWorker(QObject):
 
         mutex.unlock()
 
-        
+        # For the client that won the auction reset last handle timer
+        client_with_highest_prio.last_handle = time.time()
 
         # Return client that won an auction
         return (client_with_highest_prio_key, client_with_highest_prio)
